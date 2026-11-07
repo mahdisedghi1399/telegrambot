@@ -4,14 +4,28 @@ const fs = require('fs');
 const path = require('path');
 const { Telegraf, Markup } = require('telegraf');
 
-const { BOT_TOKEN, ADMIN_ID, CHANNEL_ID, WEBHOOK_URL, PORT = 3000 } = process.env;
+const { BOT_TOKEN, ADMIN_ID, CHANNEL_ID, WEBHOOK_URL, PROXY_URL, PORT = 3000 } = process.env;
 
 if (!BOT_TOKEN || !ADMIN_ID || !CHANNEL_ID) {
   console.error('BOT_TOKEN, ADMIN_ID and CHANNEL_ID must be set in .env');
   process.exit(1);
 }
 
-const bot = new Telegraf(BOT_TOKEN);
+// پروکسی (برای وقتی که تلگرام فیلتر است)
+// نمونه: socks5://127.0.0.1:10808  یا  http://127.0.0.1:10809
+let agent;
+if (PROXY_URL) {
+  if (PROXY_URL.startsWith('socks')) {
+    const { SocksProxyAgent } = require('socks-proxy-agent');
+    agent = new SocksProxyAgent(PROXY_URL);
+  } else {
+    const { HttpsProxyAgent } = require('https-proxy-agent');
+    agent = new HttpsProxyAgent(PROXY_URL);
+  }
+  console.log('Using proxy:', PROXY_URL);
+}
+
+const bot = new Telegraf(BOT_TOKEN, agent ? { telegram: { agent } } : {});
 const app = express();
 
 // ---------- ذخیره‌سازی ساده ----------
@@ -139,16 +153,22 @@ bot.catch((err) => console.error('Bot error:', err));
 app.get('/', (_req, res) => res.send('Bot is running'));
 
 (async () => {
-  if (WEBHOOK_URL) {
-    app.use(bot.webhookCallback('/telegram'));
-    await bot.telegram.setWebhook(`${WEBHOOK_URL.replace(/\/$/, '')}/telegram`);
-    console.log('Webhook set');
-    app.listen(PORT, () => console.log(`Express listening on ${PORT}`));
-  } else {
-    app.listen(PORT, () => console.log(`Express listening on ${PORT}`));
-    await bot.telegram.deleteWebhook();
-    bot.launch();
-    console.log('Bot started with polling');
+  try {
+    if (WEBHOOK_URL) {
+      app.use(bot.webhookCallback('/telegram'));
+      await bot.telegram.setWebhook(`${WEBHOOK_URL.replace(/\/$/, '')}/telegram`);
+      console.log('Webhook set');
+      app.listen(PORT, () => console.log(`Express listening on ${PORT}`));
+    } else {
+      app.listen(PORT, () => console.log(`Express listening on ${PORT}`));
+      await bot.telegram.deleteWebhook();
+      bot.launch();
+      console.log('Bot started with polling');
+    }
+  } catch (err) {
+    console.error('\n❌ اتصال به تلگرام برقرار نشد:', err.message);
+    console.error('اگر در ایران هستید تلگرام فیلتر است. PROXY_URL را در .env تنظیم کنید یا ربات را روی سرور خارج از ایران اجرا کنید.\n');
+    process.exit(1);
   }
 })();
 
